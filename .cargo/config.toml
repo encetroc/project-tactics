@@ -1,0 +1,3 @@
+[build]
+# Keep Bevy builds within a modest development machine's memory budget.
+jobs = 2

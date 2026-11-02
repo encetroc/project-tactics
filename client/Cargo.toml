@@ -1,0 +1,30 @@
+[package]
+name = "project-tactics-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "project-tactics-client"
+path = "src/main.rs"
+required-features = ["render"]
+
+[features]
+default = ["render"]
+# Headless tests exercise the same network code without compiling a renderer.
+render = [
+    "bevy/bevy_winit", "bevy/2d_bevy_render", "bevy/ui_bevy_render",
+    "bevy/default_font", "bevy/webgl2", "bevy/x11",
+]
+
+[dependencies]
+http = "1"
+bevy = { version = "=0.20.1", default-features = false, features = ["std", "default_app", "keyboard"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+spacetimedb-sdk = "=2.14.0"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+spacetimedb-sdk = { version = "=2.14.0", features = ["browser"] }
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "Location", "UrlSearchParams"] }

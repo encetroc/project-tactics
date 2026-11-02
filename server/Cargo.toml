@@ -1,0 +1,11 @@
+[package]
+name = "project-tactics-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+spacetimedb = "=2.14.0"
