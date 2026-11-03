@@ -1,0 +1,10 @@
+{
+  "model": "trait-vector",
+  "genome": {
+    "traits": {
+      "armor": 4.0,
+      "mobility": 7.0,
+      "focus": 3.0
+    }
+  }
+}

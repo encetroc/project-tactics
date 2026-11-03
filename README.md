@@ -1,8 +1,10 @@
 # Project Tactics
 
 A web-first **Bevy 0.20.1 + SpacetimeDB 2.14.0** foundation, following
-`../spacetime-bevy/`. No gameplay: the sole proof of work is a live list of
-connected clients, with your connection marked **(you)**.
+`../spacetime-bevy/`. The web client has no gameplay: its connected-client probe
+shows a live list of connections, with yours marked **(you)**. The workspace also
+contains an independent offline **Genome Lab** Ratatui prototype for experimenting
+with genome models and interpretation functions.
 
 ## Setup
 
@@ -47,18 +49,40 @@ credentials are stored in ignored `.local/`. Keep `.local/cli.toml` to retain
 publication ownership. Publication refuses data deletion and does not inherit
 your global cloud default. Schema-breaking changes need explicit review.
 
+## Genome Lab (offline prototype)
+
+```sh
+cargo run --locked -p genome-lab-tui
+```
+
+No database, browser, or renderer is needed for the lab. It uses
+`.local/genome-lab.json` by default (`GENOME_LAB_STORE` overrides the path).
+The current TUI supports sample genome selection, generic numeric parameter
+editing, manual execution, result inspection/comparison, batches/sweeps, and
+saved experiment definitions. Release-function execution currently saves runs
+automatically; dev runs are ephemeral. Functions have code-owned deprecation
+and the prototype still includes deprecated-release deletion.
+
+Dedicated genome/function editors, type-derived compatibility, versioned genome
+lifecycles, independent archiving instead of deletion, and live unsaved previews
+with explicit release/release saving are **agreed but not implemented**. See the
+[lab README](tools/genome-lab/README.md) for current controls and limitations,
+the [lab specification](.scratch/creature-mmo/specs/genome-lab.md), and the
+[follow-up issue](.scratch/creature-mmo/issues/13-genome-lab-editors-and-live-preview.md).
+
 ## Verification
 
 ```sh
-./scripts/check.sh                # formatting + both WASM targets
-./scripts/test.sh                 # offline native unit tests
+./scripts/check.sh                # formatting + both WASM targets + lab checks
+./scripts/test.sh                 # headless client + offline lab tests
 ./scripts/test-integration.sh     # real SDK/server; requires running, published DB
 ./scripts/verify-bindings.sh      # regenerate into temporary directory and diff
 ./scripts/web-build.sh            # release web bundle
 ```
 
-`check.sh --native` also runs unit tests. Tests use `--no-default-features` to
-exercise the network library headlessly without compiling the renderer. The integration test opens connections
+`check.sh --native` also runs client unit tests. Client tests use
+`--no-default-features` to exercise the network library headlessly without
+compiling the renderer. Both scripts also cover the lab packages. The integration test opens connections
 sharing an identity, verifies replication to both, removes one, and reconnects.
 It tolerates unrelated connected browsers and removes its own sessions on exit.
 It does not prove rendering. Follow [browser QA](docs/browser-qa.md) for that.

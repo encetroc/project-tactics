@@ -1,5 +1,5 @@
 [workspace]
-members = ["client", "server"]
+members = ["client", "server", "crates/genome", "tools/genome-lab"]
 default-members = ["client"]
 resolver = "3"
 

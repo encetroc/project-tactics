@@ -82,7 +82,7 @@ example_release_2
 
 - For now, data association is based on the Rust function name; it is the persistent interpretation identity.
 - Renaming is unsupported. Do not introduce a separate stable-ID scheme as an initial requirement.
-- Deprecation is metadata on an existing release, not a third naming category. Do not rename a release to mark it deprecated.
+- Deprecation is code-owned metadata on an existing release (`Interpretation::deprecated`), not a third naming category or a TUI/store setting. Do not rename a release to mark it deprecated. Synchronize the persisted registry from code on startup; stored flags are not authoritative.
 
 ### Dev
 
