@@ -1,6 +1,6 @@
 # Genome Lab specification
 
-Status: agreed target design; follow-up implementation pending
+Status: agreed target design; implemented in issue 13 (verification recorded in the issue comments)
 
 ## Goal
 

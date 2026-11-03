@@ -1,8 +1,8 @@
 # Add owned editors, typed compatibility, genome lifecycle, and live previews
 
-Labels: ready-for-agent
+Labels: ready-for-human
 Type: task
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Goal
 
@@ -10,12 +10,7 @@ Implement the next iteration of the existing offline Genome Lab, following the s
 
 ## Current implementation
 
-- Genome and Function columns have generic numeric parameter areas, with exposed-field editing through terminal prompts.
-- Compatibility binds each interpretation to one model-name string; execution uses JSON values and maps.
-- Functions have dev/release identities and code-owned deprecation; genome models do not yet have the same lifecycle.
-- Enter executes and automatically persists release-function runs. There is no reactive preview or separate Save action.
-- The deprecated-release deletion action and deletion tombstones still exist. Archiving does not exist.
-- Results use a generic component/JSON presentation, which remains in scope as the result viewer.
+Issue 13 implementation now provides identity-named genome/function editors, concrete Rust input contracts with typed execution, versioned genome/function lifecycle metadata, independent code-owned archival, and live unsaved previews. `S` explicitly saves a current release/release preview; invalid drafts and preview failures suppress execution and mark retained output stale. Legacy store reads are additive and preserve historical records and inert deletion-tombstone evidence. See the lab README for controls and migration behavior; issue 12 remains historical.
 
 ## Required changes
 
@@ -81,3 +76,9 @@ Implement the next iteration of the existing offline Genome Lab, following the s
 ## Comments
 
 Decisions captured from the design discussion: type-based option A was selected; archiving does not replace deprecation; live results are unsaved until an explicit eligible Save action. The prior deletion design is superseded. No further design interview is required before implementation, but implementation-specific persistence hazards must be surfaced rather than silently resolved destructively.
+
+Verification follow-up after independent review: the earlier statement above claimed deliberate mutation checks as red/green evidence. Those were mutation checks, not test-first regression tests, and are not represented as TDD evidence. The overflow regression was written and run red: `scale=1e308` returned `Ok`; reproduction showed `serde_json::to_value(f64::INFINITY)` yields JSON `null` here. Output validation now rejects that invalid component and the focused test passes. The function-switch host regression was also observed red by simulating the old selector behavior (override remained set), then green after selection reset; the isolated PTY now exercises changing the edited `allele_release_1` selection to `allele_dev_1` without an undeclared-parameter preview error. Invalid navigation discards the draft before resuming preview. The self-contained temporary fixture harness `/tmp/issue13-terminal-acceptance.py` builds a temporary registry/executable (no test flags in repo code) and asserts PTY cases for archived experiment load, all-archived with and without history, empty registry with and without history, no active compatible function, comparison, batch continuation, parameter sweep, function override reset, and invalid-draft navigation. ANSI and normalized transcripts plus per-case isolated stores are under `/tmp/issue13-terminal-acceptance/`. `./scripts/check.sh`, `./scripts/test.sh`, and `git diff --check` pass. Changed-path LSP reported zero diagnostics but its server could not confirm clean status (silent-on-clean). No commit, dependency/networking change, or real-store mutation was performed.
+
+Follow-up fixes: corrected result-pane newline rendering and historical metadata indexing when no preview exists; historical inspection now includes genome snapshot, both parameter maps, lifecycle metadata, and output in the no-compatible-function state. `genome_release_5` now has a usable model-validated editor despite having no compatible function. Batch and parameter-sweep execution now carry genome preparation parameters. Backspace/edit keys are scoped away from Results, and experiment loads reset editor selection/draft state. Added regression tests for these seams and genome-parameter batch/sweep behavior. `./scripts/check.sh`, `./scripts/test.sh`, `cargo fmt --all -- --check`, and changed-path LSP diagnostics pass. A fresh isolated PTY smoke test verified editing `genome_release_5` from 1.0 to 2.5; script/transcript/store are `/tmp/issue13-terminal-acceptance.py` and `/tmp/issue13-terminal-acceptance/`. The earlier broader temporary PTY harness referenced above was absent when this follow-up began, so its full scenario suite was not reproduced in this pass. No commit or real-store mutation was performed.
+
+UI follow-up: lower editor/detail panes now receive the yellow focus border when selected with `Tab`; saved results in the normal Results pane are scoped to the active genome/function identity pair. Added tests for editor-focus selection and exact pair filtering. Updated lab controls documentation.

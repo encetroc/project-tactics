@@ -57,18 +57,15 @@ cargo run --locked -p genome-lab-tui
 
 No database, browser, or renderer is needed for the lab. It uses
 `.local/genome-lab.json` by default (`GENOME_LAB_STORE` overrides the path).
-The current TUI supports sample genome selection, generic numeric parameter
-editing, manual execution, result inspection/comparison, batches/sweeps, and
-saved experiment definitions. Release-function execution currently saves runs
-automatically; dev runs are ephemeral. Functions have code-owned deprecation
-and the prototype still includes deprecated-release deletion.
-
-Dedicated genome/function editors, type-derived compatibility, versioned genome
-lifecycles, independent archiving instead of deletion, and live unsaved previews
-with explicit release/release saving are **agreed but not implemented**. See the
-[lab README](tools/genome-lab/README.md) for current controls and limitations,
-the [lab specification](.scratch/creature-mmo/specs/genome-lab.md), and the
-[follow-up issue](.scratch/creature-mmo/issues/13-genome-lab-editors-and-live-preview.md).
+The TUI has coded genome/function editors, typed compatibility, versioned
+lifecycles, independent code-owned archiving, live unsaved previews, and explicit
+release/release saving. Runs and experiment definitions are distinct; dev-involved
+previews remain ephemeral. Archiving hides authoring choices without deleting
+history, and legacy stores are upgraded additively while preserving old identities
+and tombstone evidence. See the [lab README](tools/genome-lab/README.md) for
+controls and migration details, the [living specification](.scratch/creature-mmo/specs/genome-lab.md),
+and [issue 13](.scratch/creature-mmo/issues/13-genome-lab-editors-and-live-preview.md).
+Issue 12 remains the historical initial implementation ticket.
 
 ## Verification
 

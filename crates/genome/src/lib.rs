@@ -1,6 +1,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{
+    any::{Any, TypeId},
+    collections::BTreeMap,
+    fs,
+    path::Path,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Component {
@@ -25,6 +30,53 @@ pub struct Run {
     pub parameters: BTreeMap<String, Value>,
     pub creature: Creature,
     pub deprecated: bool,
+    #[serde(default)]
+    pub genome_deprecated: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PreviewState {
+    pub run: Option<Run>,
+    pub stale: bool,
+    pub error: Option<String>,
+}
+impl PreviewState {
+    pub fn refresh(
+        &mut self,
+        lab: &Lab,
+        model: &str,
+        genome: &Value,
+        interpretation: &str,
+        genome_parameters: BTreeMap<String, Value>,
+        parameters: BTreeMap<String, Value>,
+        draft_valid: bool,
+    ) {
+        if !draft_valid {
+            self.stale = self.run.is_some();
+            self.error = Some("Draft is incomplete or invalid; preview was not executed".into());
+            return;
+        }
+        match lab.execute_with_genome_parameters(
+            model,
+            genome,
+            interpretation,
+            genome_parameters,
+            parameters,
+        ) {
+            Ok(run) => {
+                self.run = Some(run);
+                self.stale = false;
+                self.error = None;
+            }
+            Err(error) => {
+                self.stale = self.run.is_some();
+                self.error = Some(error);
+            }
+        }
+    }
+    pub fn current_run(&self) -> Option<&Run> {
+        (!self.stale).then_some(self.run.as_ref()).flatten()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -74,35 +126,30 @@ pub enum Lifecycle {
 
 pub trait GenomeModel: Send + Sync {
     fn name(&self) -> &'static str;
+    /// Rust contract shared with compatible interpretations, independent of model identity.
+    fn data_type(&self) -> TypeId;
+    /// Deserialize the persisted/editable representation into the model's real Rust input type.
+    fn decode(&self, genome: &Value) -> Result<Box<dyn Any + Send + Sync>, String>;
+    fn encode(&self, genome: &(dyn Any + Send + Sync)) -> Result<Value, String>;
+    fn prepare_typed(
+        &self,
+        genome: &mut (dyn Any + Send + Sync),
+        parameters: &BTreeMap<String, Value>,
+    ) -> Result<(), String>;
+    fn validate_typed(&self, genome: &(dyn Any + Send + Sync)) -> Result<(), String>;
+    fn lifecycle(&self) -> Lifecycle {
+        Lifecycle::Release
+    }
+    fn deprecated(&self) -> bool {
+        false
+    }
+    fn archived(&self) -> bool {
+        false
+    }
     fn description(&self) -> &'static str;
     fn initial(&self) -> Value;
     fn parameters(&self) -> &'static [(&'static str, f64)] {
         &[]
-    }
-    fn prepare(
-        &self,
-        genome: &Value,
-        parameters: &BTreeMap<String, Value>,
-    ) -> Result<Value, String> {
-        let mut effective = BTreeMap::new();
-        for (name, default) in self.parameters() {
-            let value = parameters
-                .get(*name)
-                .cloned()
-                .unwrap_or_else(|| Value::from(*default));
-            if !value.as_f64().is_some_and(f64::is_finite) {
-                return Err(format!("genome parameter {name} must be a finite number"));
-            }
-            effective.insert((*name).to_owned(), value);
-        }
-        if let Some(extra) = parameters
-            .keys()
-            .find(|key| !self.parameters().iter().any(|(name, _)| name == key))
-        {
-            return Err(format!("undeclared genome parameter: {extra}"));
-        }
-        let _ = effective;
-        Ok(genome.clone())
     }
     fn editable_fields(&self) -> &'static [&'static str];
     fn validate(&self, genome: &Value) -> Result<(), String>;
@@ -111,18 +158,23 @@ pub trait GenomeModel: Send + Sync {
 
 pub trait Interpretation: Send + Sync {
     fn name(&self) -> &'static str;
-    fn genome_model(&self) -> &'static str;
+    /// Rust input contract; compatibility is a direct TypeId match, never a model-name match.
+    fn input_type(&self) -> TypeId;
+    /// Execute against the actual model data, not a JSON-shaped substitute.
+    fn interpret_typed(
+        &self,
+        genome: &(dyn Any + Send + Sync),
+        parameters: &BTreeMap<String, Value>,
+    ) -> Result<Creature, String>;
+    fn archived(&self) -> bool {
+        false
+    }
     fn lifecycle(&self) -> Lifecycle;
-    /// Code-owned release metadata; override to mark a release eligible for confirmed deletion.
+    /// Code-owned release metadata; deprecated releases remain executable and saveable.
     fn deprecated(&self) -> bool {
         false
     }
     fn parameters(&self) -> &'static [(&'static str, f64)];
-    fn interpret(
-        &self,
-        genome: &Value,
-        parameters: &BTreeMap<String, Value>,
-    ) -> Result<Creature, String>;
 }
 
 #[derive(Default)]
@@ -135,7 +187,14 @@ impl Lab {
     pub fn compatible(&self, model: &str) -> Vec<&dyn Interpretation> {
         self.interpretations
             .iter()
-            .filter(|i| i.genome_model() == model)
+            .filter(|i| {
+                self.models
+                    .iter()
+                    .find(|m| m.name() == model)
+                    .is_some_and(|m| {
+                        !m.archived() && !i.archived() && i.input_type() == m.data_type()
+                    })
+            })
             .map(|i| i.as_ref())
             .collect()
     }
@@ -167,16 +226,21 @@ impl Lab {
             .iter()
             .find(|m| m.name() == model_name)
             .ok_or_else(|| format!("unknown genome model: {model_name}"))?;
+        if model.archived() {
+            return Err(format!("genome model {model_name} is archived"));
+        }
         let interpretation = self
             .interpretations
             .iter()
             .find(|i| i.name() == interpretation_name)
             .ok_or_else(|| format!("unknown interpretation: {interpretation_name}"))?;
-        if interpretation.genome_model() != model_name {
+        if interpretation.archived() {
+            return Err(format!("interpretation {interpretation_name} is archived"));
+        }
+        if interpretation.input_type() != model.data_type() {
             return Err(format!(
-                "interpretation {} requires {}, not {}",
+                "interpretation {} requires a different Rust input contract than {}",
                 interpretation.name(),
-                interpretation.genome_model(),
                 model_name
             ));
         }
@@ -185,6 +249,12 @@ impl Lab {
             .find(|key| !model.parameters().iter().any(|(name, _)| name == key))
         {
             return Err(format!("undeclared genome parameter: {extra}"));
+        }
+        if genome_parameters
+            .values()
+            .any(|value| value.as_f64().is_none_or(|n| !n.is_finite()))
+        {
+            return Err("genome parameters must be finite numbers".into());
         }
         let effective_genome_parameters: BTreeMap<String, Value> = model
             .parameters()
@@ -199,13 +269,15 @@ impl Lab {
                 )
             })
             .collect();
-        let prepared_genome = model.prepare(genome, &effective_genome_parameters)?;
-        model.validate(&prepared_genome)?;
+        let mut typed_genome = model.decode(genome)?;
+        model.prepare_typed(typed_genome.as_mut(), &effective_genome_parameters)?;
+        model.validate_typed(typed_genome.as_ref())?;
+        let prepared_genome = model.encode(typed_genome.as_ref())?;
         let mut effective = BTreeMap::new();
         for (name, default) in interpretation.parameters() {
             let default = Value::from(*default);
             let value = parameters.get(*name).unwrap_or(&default);
-            if value.is_number() {
+            if value.as_f64().is_some_and(f64::is_finite) {
                 effective.insert((*name).to_owned(), value.clone());
             } else {
                 return Err(format!("parameter {name} must be numeric"));
@@ -217,7 +289,7 @@ impl Lab {
         {
             return Err(format!("undeclared parameter: {extra}"));
         }
-        let creature = interpretation.interpret(&prepared_genome, &effective)?;
+        let creature = interpretation.interpret_typed(typed_genome.as_ref(), &effective)?;
         validate_creature(&creature)?;
         Ok(Run {
             interpretation: interpretation.name().into(),
@@ -227,6 +299,7 @@ impl Lab {
             parameters: effective,
             creature,
             deprecated: interpretation.deprecated(),
+            genome_deprecated: model.deprecated(),
         })
     }
     pub fn sweep(
@@ -234,6 +307,27 @@ impl Lab {
         model: &str,
         genome: &Value,
         interpretation: &str,
+        base_parameters: &BTreeMap<String, Value>,
+        parameter: &str,
+        values: &[Value],
+    ) -> BatchResult {
+        self.sweep_with_genome_parameters(
+            model,
+            genome,
+            interpretation,
+            &BTreeMap::new(),
+            base_parameters,
+            parameter,
+            values,
+        )
+    }
+
+    pub fn sweep_with_genome_parameters(
+        &self,
+        model: &str,
+        genome: &Value,
+        interpretation: &str,
+        genome_parameters: &BTreeMap<String, Value>,
         base_parameters: &BTreeMap<String, Value>,
         parameter: &str,
         values: &[Value],
@@ -246,7 +340,7 @@ impl Lab {
                 (genome.clone(), interpretation.to_owned(), parameters)
             })
             .collect();
-        self.batch(model, &cases)
+        self.batch_with_genome_parameters(model, genome_parameters, &cases)
     }
 
     pub fn batch(
@@ -254,12 +348,27 @@ impl Lab {
         model: &str,
         cases: &[(Value, String, BTreeMap<String, Value>)],
     ) -> BatchResult {
+        self.batch_with_genome_parameters(model, &BTreeMap::new(), cases)
+    }
+
+    pub fn batch_with_genome_parameters(
+        &self,
+        model: &str,
+        genome_parameters: &BTreeMap<String, Value>,
+        cases: &[(Value, String, BTreeMap<String, Value>)],
+    ) -> BatchResult {
         let mut result = BatchResult {
             runs: Vec::new(),
             failures: Vec::new(),
         };
         for (index, (genome, interpretation, params)) in cases.iter().enumerate() {
-            match self.execute(model, genome, interpretation, params.clone()) {
+            match self.execute_with_genome_parameters(
+                model,
+                genome,
+                interpretation,
+                genome_parameters.clone(),
+                params.clone(),
+            ) {
                 Ok(run) => result.runs.push(run),
                 Err(error) => result.failures.push(FailedCase { index, error }),
             }
@@ -272,10 +381,25 @@ impl Lab {
 pub struct ReleaseRecord {
     pub name: String,
     pub deprecated: bool,
+    #[serde(default)]
+    pub archived: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct GenomeRecord {
+    pub name: String,
+    pub deprecated: bool,
+    #[serde(default)]
+    pub archived: bool,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct Store {
+    /// Historical function release registry. Retained under its legacy key for lossless migration.
     pub releases: BTreeMap<String, ReleaseRecord>,
+    #[serde(default)]
+    pub genome_releases: BTreeMap<String, GenomeRecord>,
+    #[serde(default)]
+    pub schema_version: u32,
     pub runs: Vec<Run>,
     #[serde(default)]
     pub experiments: BTreeMap<String, ExperimentDefinition>,
@@ -294,8 +418,14 @@ impl Store {
         if !path.exists() {
             return Ok(Self::default());
         }
-        serde_json::from_slice(&fs::read(path).map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string())
+        let mut store: Self = serde_json::from_slice(&fs::read(path).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
+        // Version 1 is the additive compatibility envelope: old names and tombstone evidence
+        // remain unchanged until a later explicit authoring save registers versioned identities.
+        if store.schema_version == 0 {
+            store.schema_version = 1;
+        }
+        Ok(store)
     }
     pub fn save(&self, path: &Path) -> Result<(), String> {
         if let Some(parent) = path.parent() {
@@ -309,15 +439,29 @@ impl Store {
             e.to_string()
         })
     }
+    pub fn register_model(&mut self, model: &dyn GenomeModel) -> Result<(), String> {
+        if model.lifecycle() != Lifecycle::Release {
+            return Err("only release genome models may be registered".into());
+        }
+        let name = model.name();
+        if !valid_name(name, "release") {
+            return Err(format!("invalid genome release name: {name}"));
+        }
+        self.genome_releases.insert(
+            name.into(),
+            GenomeRecord {
+                name: name.into(),
+                deprecated: model.deprecated(),
+                archived: model.archived(),
+            },
+        );
+        self.schema_version = 2;
+        Ok(())
+    }
     pub fn register(&mut self, interpretation: &dyn Interpretation) -> Result<(), String> {
         let name = interpretation.name();
         if interpretation.lifecycle() != Lifecycle::Release {
             return Err("only release interpretations may be registered".into());
-        }
-        if self.deleted_releases.contains(name) {
-            return Err(format!(
-                "release {name} was explicitly deleted; publish a new release name instead"
-            ));
         }
         if !valid_name(name, "release") {
             return Err(format!("invalid release name: {name}"));
@@ -328,8 +472,10 @@ impl Store {
             ReleaseRecord {
                 name: name.into(),
                 deprecated: interpretation.deprecated(),
+                archived: interpretation.archived(),
             },
         );
+        self.schema_version = 2;
         Ok(())
     }
     pub fn validate_registry<'a>(&self, registered: impl Iterator<Item = &'a str>) -> Vec<String> {
@@ -340,39 +486,38 @@ impl Store {
             .map(|n| format!("registered release missing from code: {n}"))
             .collect()
     }
+    pub fn validate_genome_registry<'a>(
+        &self,
+        registered: impl Iterator<Item = &'a str>,
+    ) -> Vec<String> {
+        let current: std::collections::BTreeSet<_> = registered.collect();
+        self.genome_releases
+            .keys()
+            .filter(|name| !current.contains(name.as_str()))
+            .map(|name| format!("registered genome release missing from code: {name}"))
+            .collect()
+    }
     pub fn save_run(&mut self, run: Run) -> Result<(), String> {
         if !valid_name(&run.interpretation, "release")
             || !self.releases.contains_key(&run.interpretation)
+            || !valid_name(&run.genome_model, "release")
+            || !self.genome_releases.contains_key(&run.genome_model)
+            || self
+                .releases
+                .get(&run.interpretation)
+                .is_some_and(|record| record.archived)
+            || self
+                .genome_releases
+                .get(&run.genome_model)
+                .is_some_and(|record| record.archived)
         {
-            return Err("only registered release interpretations may persist runs".into());
+            return Err("only registered release/release pairs may persist runs".into());
         }
         let mut run = run;
         run.deprecated = self.releases[&run.interpretation].deprecated;
+        run.genome_deprecated = self.genome_releases[&run.genome_model].deprecated;
         self.runs.push(run);
         Ok(())
-    }
-    pub fn delete_deprecated(&mut self, name: &str, confirmed: bool) -> Result<usize, String> {
-        let release = self
-            .releases
-            .get(name)
-            .ok_or_else(|| "unknown release".to_string())?;
-        if !release.deprecated {
-            return Err("release must be deprecated before deletion".into());
-        }
-        if !confirmed {
-            return Err(format!(
-                "confirmation required; deletion removes {} associated runs",
-                self.runs
-                    .iter()
-                    .filter(|r| r.interpretation == name)
-                    .count()
-            ));
-        }
-        self.releases.remove(name);
-        self.deleted_releases.insert(name.to_owned());
-        let before = self.runs.len();
-        self.runs.retain(|r| r.interpretation != name);
-        Ok(before - self.runs.len())
     }
 }
 fn validate_creature(creature: &Creature) -> Result<(), String> {
@@ -380,6 +525,12 @@ fn validate_creature(creature: &Creature) -> Result<(), String> {
     for component in &creature.components {
         if component.key.trim().is_empty() || component.unit.trim().is_empty() {
             return Err("creature components need semantic keys and units".into());
+        }
+        if component.value.is_null() || component.value.as_f64().is_some_and(|n| !n.is_finite()) {
+            return Err(format!(
+                "creature component {} has invalid non-finite output",
+                component.key
+            ));
         }
         if !identities.insert(component.key.as_str()) {
             return Err(format!(
@@ -457,10 +608,58 @@ pub fn valid_name(name: &str, category: &str) -> bool {
         })
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct AlleleInput(pub BTreeMap<String, [u32; 2]>);
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct IsolatedInput {
+    pub value: f64,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TraitVectorInput {
+    pub traits: BTreeMap<String, f64>,
+}
+
 pub struct AlleleModel;
 impl GenomeModel for AlleleModel {
+    fn data_type(&self) -> TypeId {
+        TypeId::of::<AlleleInput>()
+    }
+    fn decode(&self, genome: &Value) -> Result<Box<dyn Any + Send + Sync>, String> {
+        serde_json::from_value::<AlleleInput>(genome.clone())
+            .map(|input| Box::new(input) as Box<dyn Any + Send + Sync>)
+            .map_err(|error| error.to_string())
+    }
+    fn encode(&self, genome: &(dyn Any + Send + Sync)) -> Result<Value, String> {
+        let input = genome
+            .downcast_ref::<AlleleInput>()
+            .ok_or("genome type contract mismatch")?;
+        serde_json::to_value(input).map_err(|error| error.to_string())
+    }
+    fn prepare_typed(
+        &self,
+        genome: &mut (dyn Any + Send + Sync),
+        parameters: &BTreeMap<String, Value>,
+    ) -> Result<(), String> {
+        if !parameters.is_empty() {
+            return Err("undeclared genome parameter".into());
+        }
+        self.validate_typed(genome)
+    }
+    fn validate_typed(&self, genome: &(dyn Any + Send + Sync)) -> Result<(), String> {
+        let input = genome
+            .downcast_ref::<AlleleInput>()
+            .ok_or("genome type contract mismatch")?;
+        if input.0.is_empty()
+            || !input.0.contains_key("strength")
+            || !input.0.contains_key("vitality")
+        {
+            return Err("genome must contain strength and vitality loci".into());
+        }
+        Ok(())
+    }
     fn name(&self) -> &'static str {
-        "allele-pair"
+        "genome_release_1"
     }
     fn description(&self) -> &'static str {
         "Unordered diploid loci: each trait has two allele values."
@@ -472,24 +671,8 @@ impl GenomeModel for AlleleModel {
         &["strength.0", "strength.1", "vitality.0", "vitality.1"]
     }
     fn validate(&self, g: &Value) -> Result<(), String> {
-        let o = g.as_object().ok_or("genome must be an object")?;
-        if o.is_empty() {
-            return Err("genome must have loci".into());
-        }
-        for required in ["strength", "vitality"] {
-            if !o.contains_key(required) {
-                return Err(format!("required locus missing: {required}"));
-            }
-        }
-        for (k, v) in o {
-            let a = v
-                .as_array()
-                .ok_or_else(|| format!("locus {k} must be a pair"))?;
-            if a.len() != 2 || a.iter().any(|x| x.as_i64().filter(|n| *n >= 0).is_none()) {
-                return Err(format!("locus {k} must contain two nonnegative integers"));
-            }
-        }
-        Ok(())
+        let typed = self.decode(g)?;
+        self.validate_typed(typed.as_ref())
     }
     fn edit(&self, g: &mut Value, field: &str, value: Value) -> Result<(), String> {
         if !self.editable_fields().contains(&field) {
@@ -513,10 +696,252 @@ impl GenomeModel for AlleleModel {
         self.validate(g)
     }
 }
+pub struct AlleleModelV2;
+impl GenomeModel for AlleleModelV2 {
+    fn name(&self) -> &'static str {
+        "genome_release_2"
+    }
+    fn data_type(&self) -> TypeId {
+        TypeId::of::<AlleleInput>()
+    }
+    fn decode(&self, genome: &Value) -> Result<Box<dyn Any + Send + Sync>, String> {
+        AlleleModel.decode(genome)
+    }
+    fn encode(&self, genome: &(dyn Any + Send + Sync)) -> Result<Value, String> {
+        AlleleModel.encode(genome)
+    }
+    fn prepare_typed(
+        &self,
+        genome: &mut (dyn Any + Send + Sync),
+        parameters: &BTreeMap<String, Value>,
+    ) -> Result<(), String> {
+        AlleleModel.prepare_typed(genome, parameters)
+    }
+    fn validate_typed(&self, genome: &(dyn Any + Send + Sync)) -> Result<(), String> {
+        AlleleModel.validate_typed(genome)
+    }
+    fn deprecated(&self) -> bool {
+        true
+    }
+    fn description(&self) -> &'static str {
+        "A deprecated second coded model using the shared allele-pair data contract."
+    }
+    fn initial(&self) -> Value {
+        AlleleModel.initial()
+    }
+    fn editable_fields(&self) -> &'static [&'static str] {
+        AlleleModel.editable_fields()
+    }
+    fn validate(&self, genome: &Value) -> Result<(), String> {
+        AlleleModel.validate(genome)
+    }
+    fn edit(&self, genome: &mut Value, field: &str, value: Value) -> Result<(), String> {
+        AlleleModel.edit(genome, field, value)
+    }
+}
+pub struct IsolatedModel;
+impl GenomeModel for IsolatedModel {
+    fn name(&self) -> &'static str {
+        "genome_release_5"
+    }
+    fn data_type(&self) -> TypeId {
+        TypeId::of::<IsolatedInput>()
+    }
+    fn decode(&self, value: &Value) -> Result<Box<dyn Any + Send + Sync>, String> {
+        serde_json::from_value::<IsolatedInput>(value.clone())
+            .map(|input| Box::new(input) as Box<dyn Any + Send + Sync>)
+            .map_err(|error| error.to_string())
+    }
+    fn encode(&self, value: &(dyn Any + Send + Sync)) -> Result<Value, String> {
+        serde_json::to_value(
+            value
+                .downcast_ref::<IsolatedInput>()
+                .ok_or("genome type contract mismatch")?,
+        )
+        .map_err(|error| error.to_string())
+    }
+    fn prepare_typed(
+        &self,
+        value: &mut (dyn Any + Send + Sync),
+        parameters: &BTreeMap<String, Value>,
+    ) -> Result<(), String> {
+        if !parameters.is_empty() {
+            return Err("undeclared genome parameter".into());
+        }
+        self.validate_typed(value)
+    }
+    fn validate_typed(&self, value: &(dyn Any + Send + Sync)) -> Result<(), String> {
+        let input = value
+            .downcast_ref::<IsolatedInput>()
+            .ok_or("genome type contract mismatch")?;
+        if !input.value.is_finite() {
+            return Err("value must be finite".into());
+        }
+        Ok(())
+    }
+    fn description(&self) -> &'static str {
+        "An isolated typed genome island with no registered interpretation."
+    }
+    fn initial(&self) -> Value {
+        serde_json::json!({"value": 1.0})
+    }
+    fn editable_fields(&self) -> &'static [&'static str] {
+        &["value"]
+    }
+    fn validate(&self, value: &Value) -> Result<(), String> {
+        let typed = self.decode(value)?;
+        self.validate_typed(typed.as_ref())
+    }
+    fn edit(&self, genome: &mut Value, field: &str, value: Value) -> Result<(), String> {
+        if field != "value" {
+            return Err("field is not exposed for editing: value".into());
+        }
+        let number = value
+            .as_f64()
+            .filter(|number| number.is_finite())
+            .ok_or("value must be finite")?;
+        genome["value"] = serde_json::json!(number);
+        Ok(())
+    }
+}
+pub struct AlleleArchivedModel;
+impl GenomeModel for AlleleArchivedModel {
+    fn name(&self) -> &'static str {
+        "genome_release_4"
+    }
+    fn data_type(&self) -> TypeId {
+        AlleleModel.data_type()
+    }
+    fn decode(&self, value: &Value) -> Result<Box<dyn Any + Send + Sync>, String> {
+        AlleleModel.decode(value)
+    }
+    fn encode(&self, value: &(dyn Any + Send + Sync)) -> Result<Value, String> {
+        AlleleModel.encode(value)
+    }
+    fn prepare_typed(
+        &self,
+        value: &mut (dyn Any + Send + Sync),
+        parameters: &BTreeMap<String, Value>,
+    ) -> Result<(), String> {
+        AlleleModel.prepare_typed(value, parameters)
+    }
+    fn validate_typed(&self, value: &(dyn Any + Send + Sync)) -> Result<(), String> {
+        AlleleModel.validate_typed(value)
+    }
+    fn lifecycle(&self) -> Lifecycle {
+        Lifecycle::Release
+    }
+    fn archived(&self) -> bool {
+        true
+    }
+    fn description(&self) -> &'static str {
+        "Archived allele model retained for historical references."
+    }
+    fn initial(&self) -> Value {
+        AlleleModel.initial()
+    }
+    fn editable_fields(&self) -> &'static [&'static str] {
+        AlleleModel.editable_fields()
+    }
+    fn validate(&self, value: &Value) -> Result<(), String> {
+        AlleleModel.validate(value)
+    }
+    fn edit(&self, value: &mut Value, field: &str, input: Value) -> Result<(), String> {
+        AlleleModel.edit(value, field, input)
+    }
+}
+pub struct AlleleDevModel;
+impl GenomeModel for AlleleDevModel {
+    fn name(&self) -> &'static str {
+        "genome_dev_1"
+    }
+    fn data_type(&self) -> TypeId {
+        AlleleModel.data_type()
+    }
+    fn decode(&self, value: &Value) -> Result<Box<dyn Any + Send + Sync>, String> {
+        AlleleModel.decode(value)
+    }
+    fn encode(&self, value: &(dyn Any + Send + Sync)) -> Result<Value, String> {
+        AlleleModel.encode(value)
+    }
+    fn prepare_typed(
+        &self,
+        value: &mut (dyn Any + Send + Sync),
+        parameters: &BTreeMap<String, Value>,
+    ) -> Result<(), String> {
+        AlleleModel.prepare_typed(value, parameters)
+    }
+    fn validate_typed(&self, value: &(dyn Any + Send + Sync)) -> Result<(), String> {
+        AlleleModel.validate_typed(value)
+    }
+    fn lifecycle(&self) -> Lifecycle {
+        Lifecycle::Dev
+    }
+    fn description(&self) -> &'static str {
+        "Development allele-pair model."
+    }
+    fn initial(&self) -> Value {
+        AlleleModel.initial()
+    }
+    fn editable_fields(&self) -> &'static [&'static str] {
+        AlleleModel.editable_fields()
+    }
+    fn validate(&self, value: &Value) -> Result<(), String> {
+        AlleleModel.validate(value)
+    }
+    fn edit(&self, value: &mut Value, field: &str, input: Value) -> Result<(), String> {
+        AlleleModel.edit(value, field, input)
+    }
+}
 pub struct TraitVectorModel;
 impl GenomeModel for TraitVectorModel {
+    fn data_type(&self) -> TypeId {
+        TypeId::of::<TraitVectorInput>()
+    }
+    fn decode(&self, genome: &Value) -> Result<Box<dyn Any + Send + Sync>, String> {
+        serde_json::from_value::<TraitVectorInput>(genome.clone())
+            .map(|input| Box::new(input) as Box<dyn Any + Send + Sync>)
+            .map_err(|error| error.to_string())
+    }
+    fn encode(&self, genome: &(dyn Any + Send + Sync)) -> Result<Value, String> {
+        serde_json::to_value(
+            genome
+                .downcast_ref::<TraitVectorInput>()
+                .ok_or("genome type contract mismatch")?,
+        )
+        .map_err(|error| error.to_string())
+    }
+    fn prepare_typed(
+        &self,
+        genome: &mut (dyn Any + Send + Sync),
+        parameters: &BTreeMap<String, Value>,
+    ) -> Result<(), String> {
+        let input = genome
+            .downcast_mut::<TraitVectorInput>()
+            .ok_or("genome type contract mismatch")?;
+        let gain = parameters
+            .get("expression_gain")
+            .and_then(Value::as_f64)
+            .ok_or("expression_gain must be numeric")?;
+        if !gain.is_finite() {
+            return Err("expression_gain must be finite".into());
+        }
+        for value in input.traits.values_mut() {
+            *value *= gain;
+        }
+        Ok(())
+    }
+    fn validate_typed(&self, genome: &(dyn Any + Send + Sync)) -> Result<(), String> {
+        let input = genome
+            .downcast_ref::<TraitVectorInput>()
+            .ok_or("genome type contract mismatch")?;
+        if input.traits.is_empty() || input.traits.values().any(|value| !value.is_finite()) {
+            return Err("traits must be nonempty and finite".into());
+        }
+        Ok(())
+    }
     fn name(&self) -> &'static str {
-        "trait-vector"
+        "genome_release_3"
     }
     fn description(&self) -> &'static str {
         "Named, independent real-valued trait coordinates; no loci or sequence."
@@ -527,47 +952,12 @@ impl GenomeModel for TraitVectorModel {
     fn parameters(&self) -> &'static [(&'static str, f64)] {
         &[("expression_gain", 1.0)]
     }
-    fn prepare(
-        &self,
-        genome: &Value,
-        parameters: &BTreeMap<String, Value>,
-    ) -> Result<Value, String> {
-        let gain = parameters
-            .get("expression_gain")
-            .and_then(Value::as_f64)
-            .unwrap_or(1.0);
-        if !gain.is_finite() {
-            return Err("genome parameter expression_gain must be finite".into());
-        }
-        if parameters.keys().any(|key| key != "expression_gain") {
-            return Err("undeclared genome parameter".into());
-        }
-        let mut output = genome.clone();
-        let traits = output
-            .get_mut("traits")
-            .and_then(Value::as_object_mut)
-            .ok_or("genome needs a traits object")?;
-        for value in traits.values_mut() {
-            let trait_value = value.as_f64().ok_or("traits must be numeric")?;
-            *value = serde_json::json!(trait_value * gain);
-        }
-        Ok(output)
-    }
     fn editable_fields(&self) -> &'static [&'static str] {
         &["armor", "mobility", "focus"]
     }
     fn validate(&self, g: &Value) -> Result<(), String> {
-        let o = g
-            .get("traits")
-            .and_then(Value::as_object)
-            .ok_or("genome needs a traits object")?;
-        if o.is_empty()
-            || o.values()
-                .any(|v| v.as_f64().is_none_or(|n| !n.is_finite()))
-        {
-            return Err("traits must be nonempty and finite".into());
-        }
-        Ok(())
+        let typed = self.decode(g)?;
+        self.validate_typed(typed.as_ref())
     }
     fn edit(&self, g: &mut Value, field: &str, value: Value) -> Result<(), String> {
         if !self.editable_fields().contains(&field) {
@@ -585,30 +975,46 @@ impl GenomeModel for TraitVectorModel {
         self.validate(g)
     }
 }
-pub struct AlleleCombat;
-impl Interpretation for AlleleCombat {
+pub struct AlleleArchivedFunction;
+impl Interpretation for AlleleArchivedFunction {
     fn name(&self) -> &'static str {
-        "allele_release_1"
+        "allele_release_2"
     }
-    fn genome_model(&self) -> &'static str {
-        "allele-pair"
+    fn input_type(&self) -> TypeId {
+        TypeId::of::<AlleleInput>()
+    }
+    fn interpret_typed(
+        &self,
+        input: &(dyn Any + Send + Sync),
+        parameters: &BTreeMap<String, Value>,
+    ) -> Result<Creature, String> {
+        AlleleCombat.interpret_typed(input, parameters)
+    }
+    fn archived(&self) -> bool {
+        true
     }
     fn lifecycle(&self) -> Lifecycle {
         Lifecycle::Release
     }
     fn parameters(&self) -> &'static [(&'static str, f64)] {
-        &[("scale", 1.0)]
+        AlleleCombat.parameters()
     }
-    fn interpret(&self, g: &Value, p: &BTreeMap<String, Value>) -> Result<Creature, String> {
-        let scale = p["scale"].as_f64().unwrap();
-        let mean = |k: &str| {
-            g[k].as_array()
-                .unwrap()
-                .iter()
-                .map(|v| v.as_f64().unwrap())
-                .sum::<f64>()
-                / 2.0
-        };
+}
+pub struct AlleleCombat;
+impl Interpretation for AlleleCombat {
+    fn interpret_typed(
+        &self,
+        genome: &(dyn Any + Send + Sync),
+        parameters: &BTreeMap<String, Value>,
+    ) -> Result<Creature, String> {
+        let input = genome
+            .downcast_ref::<AlleleInput>()
+            .ok_or("function input type contract mismatch")?;
+        let scale = parameters
+            .get("scale")
+            .and_then(Value::as_f64)
+            .ok_or("scale must be numeric")?;
+        let mean = |key: &str| input.0[key].iter().map(|v| f64::from(*v)).sum::<f64>() / 2.0;
         Ok(Creature {
             components: vec![
                 component("vitality", "Vitality", mean("vitality") * scale, "points"),
@@ -616,14 +1022,43 @@ impl Interpretation for AlleleCombat {
             ],
         })
     }
+    fn name(&self) -> &'static str {
+        "allele_release_1"
+    }
+    fn input_type(&self) -> TypeId {
+        TypeId::of::<AlleleInput>()
+    }
+    fn lifecycle(&self) -> Lifecycle {
+        Lifecycle::Release
+    }
+    fn parameters(&self) -> &'static [(&'static str, f64)] {
+        &[("scale", 1.0)]
+    }
 }
 pub struct AlleleMobility;
 impl Interpretation for AlleleMobility {
+    fn interpret_typed(
+        &self,
+        genome: &(dyn Any + Send + Sync),
+        _: &BTreeMap<String, Value>,
+    ) -> Result<Creature, String> {
+        let input = genome
+            .downcast_ref::<AlleleInput>()
+            .ok_or("function input type contract mismatch")?;
+        Ok(Creature {
+            components: vec![component(
+                "strength",
+                "Strength",
+                input.0["strength"][0],
+                "allele",
+            )],
+        })
+    }
     fn name(&self) -> &'static str {
         "allele_dev_1"
     }
-    fn genome_model(&self) -> &'static str {
-        "allele-pair"
+    fn input_type(&self) -> TypeId {
+        TypeId::of::<AlleleInput>()
     }
     fn lifecycle(&self) -> Lifecycle {
         Lifecycle::Dev
@@ -631,24 +1066,34 @@ impl Interpretation for AlleleMobility {
     fn parameters(&self) -> &'static [(&'static str, f64)] {
         &[]
     }
-    fn interpret(&self, g: &Value, _: &BTreeMap<String, Value>) -> Result<Creature, String> {
-        Ok(Creature {
-            components: vec![component(
-                "strength",
-                "Strength",
-                g["strength"][0].as_i64().unwrap_or(0),
-                "allele",
-            )],
-        })
-    }
 }
 pub struct VectorCombat;
 impl Interpretation for VectorCombat {
+    fn interpret_typed(
+        &self,
+        genome: &(dyn Any + Send + Sync),
+        parameters: &BTreeMap<String, Value>,
+    ) -> Result<Creature, String> {
+        let input = genome
+            .downcast_ref::<TraitVectorInput>()
+            .ok_or("function input type contract mismatch")?;
+        let gain = parameters
+            .get("gain")
+            .and_then(Value::as_f64)
+            .ok_or("gain must be numeric")?;
+        Ok(Creature {
+            components: input
+                .traits
+                .iter()
+                .map(|(key, value)| component(key, key, value * gain, "trait units"))
+                .collect(),
+        })
+    }
     fn name(&self) -> &'static str {
         "vector_release_1"
     }
-    fn genome_model(&self) -> &'static str {
-        "trait-vector"
+    fn input_type(&self) -> TypeId {
+        TypeId::of::<TraitVectorInput>()
     }
     fn lifecycle(&self) -> Lifecycle {
         Lifecycle::Release
@@ -656,22 +1101,20 @@ impl Interpretation for VectorCombat {
     fn parameters(&self) -> &'static [(&'static str, f64)] {
         &[("gain", 1.0)]
     }
-    fn interpret(&self, g: &Value, p: &BTreeMap<String, Value>) -> Result<Creature, String> {
-        let gain = p["gain"].as_f64().unwrap();
-        let t = g["traits"].as_object().unwrap();
-        Ok(Creature {
-            components: t
-                .iter()
-                .map(|(k, v)| component(k, k, v.as_f64().unwrap() * gain, "trait units"))
-                .collect(),
-        })
-    }
 }
 pub fn example_lab() -> Lab {
     Lab {
-        models: vec![Box::new(AlleleModel), Box::new(TraitVectorModel)],
+        models: vec![
+            Box::new(AlleleModel),
+            Box::new(AlleleModelV2),
+            Box::new(TraitVectorModel),
+            Box::new(AlleleDevModel),
+            Box::new(IsolatedModel),
+            Box::new(AlleleArchivedModel),
+        ],
         interpretations: vec![
             Box::new(AlleleCombat),
+            Box::new(AlleleArchivedFunction),
             Box::new(AlleleMobility),
             Box::new(VectorCombat),
         ],
