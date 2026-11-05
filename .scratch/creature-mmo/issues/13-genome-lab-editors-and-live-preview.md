@@ -1,6 +1,6 @@
 # Add owned editors, typed compatibility, genome lifecycle, and live previews
 
-> **Historical TUI implementation record; UI design retired.** The [current Genome Lab specification](../specs/genome-lab.md) supersedes the Ratatui-first requirements below with a Rust web-first lab and explicit seeded generation → editable genome → interpretation. Framework selection is open. Preserve this ticket as history, not as a current UI implementation plan; this change does not remove code or stored data.
+> **Historical TUI implementation record; implementation removed.** The [current Genome Lab specification](../specs/genome-lab.md) supersedes the Ratatui-first requirements below with a Rust web-first lab and explicit seeded generation → editable genome → interpretation. Framework selection is open. Preserve this ticket as history, not as a current UI implementation plan. The TUI and engine have since been removed; any ignored local store was left untouched.
 
 Labels: ready-for-human
 Type: task

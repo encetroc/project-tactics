@@ -1,5 +1,5 @@
 [workspace]
-members = ["client", "server", "crates/genome", "tools/genome-lab"]
+members = ["client", "server", "tools/tui-starter"]
 default-members = ["client"]
 resolver = "3"
 

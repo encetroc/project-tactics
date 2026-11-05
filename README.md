@@ -50,34 +50,33 @@ credentials are stored in ignored `.local/`. Keep `.local/cli.toml` to retain
 publication ownership. Publication refuses data deletion and does not inherit
 your global cloud default. Schema-breaking changes need explicit review.
 
-## Genome Lab (legacy offline prototype)
+## Genome Lab
 
-The TUI design is retired; the [current specification](.scratch/creature-mmo/specs/genome-lab.md)
-defines the Rust web-first replacement. It is not yet implemented. The command
-and behavior below describe the existing prototype, which remains available;
-this design change does not remove code or stored experiments.
+The retired Genome Lab TUI, domain engine, and sample experiments have been
+removed. Its [web-first specification](.scratch/creature-mmo/specs/genome-lab.md)
+remains the target for a future implementation and is not yet implemented.
+Historical issues 12 and 13 remain as records of the former design and work.
+The ignored `.local/genome-lab.json` store, if present, is deliberately left
+untouched and is not used by the project.
+
+## Ratatui starter
+
+`tools/tui-starter` is a small, independent Rust terminal UI scaffold using the
+workspace-pinned Ratatui and Crossterm versions. It demonstrates terminal setup,
+a minimal event/render loop, and terminal restoration. Use it as a starting point
+for future unrelated TUIs; it contains no Genome Lab functionality.
 
 ```sh
-cargo run --locked -p genome-lab-tui
+cargo run --locked -p tui-starter
 ```
 
-No database, browser, or renderer is needed for the lab. It uses
-`.local/genome-lab.json` by default (`GENOME_LAB_STORE` overrides the path).
-The TUI has coded genome/function editors, typed compatibility, versioned
-lifecycles, independent code-owned archiving, live unsaved previews, and explicit
-release/release saving. Runs and experiment definitions are distinct; dev-involved
-previews remain ephemeral. Archiving hides authoring choices without deleting
-history, and legacy stores are upgraded additively while preserving old identities
-and tombstone evidence. See the [lab README](tools/genome-lab/README.md) for
-controls and migration details, the [living specification](.scratch/creature-mmo/specs/genome-lab.md),
-and the historical [issue 13](.scratch/creature-mmo/issues/13-genome-lab-editors-and-live-preview.md).
-Issues 12 and 13 are legacy implementation records, not the new web UI plan.
+Press `q` to quit. The starter's test uses Ratatui's in-memory test backend.
 
 ## Verification
 
 ```sh
-./scripts/check.sh                # formatting + both WASM targets + lab checks
-./scripts/test.sh                 # headless client + offline lab tests
+./scripts/check.sh                # formatting + both WASM targets + starter check
+./scripts/test.sh                 # headless client + starter tests
 ./scripts/test-integration.sh     # real SDK/server; requires running, published DB
 ./scripts/verify-bindings.sh      # regenerate into temporary directory and diff
 ./scripts/web-build.sh            # release web bundle

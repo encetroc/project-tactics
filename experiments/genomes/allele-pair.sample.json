@@ -1,7 +1,0 @@
-{
-  "model": "allele-pair",
-  "genome": {
-    "strength": [3, 5],
-    "vitality": [8, 6]
-  }
-}

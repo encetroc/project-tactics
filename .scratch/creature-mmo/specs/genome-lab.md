@@ -24,7 +24,7 @@ Combined: Y = I(E(G(s; p_G)); p_I)
 
 The lab hosts experiments; it does not prescribe genetics semantics. JSON may remain a serialization format, but is neither the domain model nor the required editing experience.
 
-This document defines the revised target, not implemented behavior. [Issue 12](../issues/12-genome-lab.md) and [issue 13](../issues/13-genome-lab-editors-and-live-preview.md) are historical TUI implementation records. Their Ratatui-specific UI requirements are superseded. See the [lab README](../../../tools/genome-lab/README.md) for the still-existing legacy application. This documentation change neither implements the web lab nor removes the TUI code. No unrequested gameplay changes belong in the connected-client probe.
+This document defines the revised target, not implemented behavior. [Issue 12](../issues/12-genome-lab.md) and [issue 13](../issues/13-genome-lab-editors-and-live-preview.md) are historical TUI implementation records; their Ratatui-specific UI requirements are superseded. The former TUI and its domain engine have been removed. No unrequested gameplay changes belong in the connected-client probe.
 
 ## Motivation and relationship to existing decisions
 
@@ -143,7 +143,7 @@ Both genome models and functions use versioned dev/release identities, for examp
 ## Web interface and repository integration
 
 - Web UI is the primary interactive lab. The Ratatui solution, terminal layout, keyboard/focus conventions, and mandatory identity-named Ratatui editor modules are retired requirements. Do not maintain TUI feature parity or extend it as the new target.
-- Existing TUI code remains a legacy prototype until an explicit implementation/removal change. Preserve reusable engine behavior, regression tests, and historical data; retiring a design does not authorize deleting code or stored experiments.
+- The retired TUI and its domain engine are removed. Keep this web-first target independent of the reusable Ratatui starter; no Genome Lab functionality belongs in that starter.
 - All authored application code is Rust, including web UI and any backend. No web framework, rendering library, browser-WASM versus local-backend architecture, or new deployment/port arrangement is selected by this spec.
 - Keep model, generation, validation, editing operations, interpretation, and persistence contracts independent of the chosen UI framework and game/network startup.
 - Provide model-appropriate genome editors, generator controls with explicit seed and parameters, and interpreter parameter editors with discoverable actions and inline validation. Do not duplicate authoritative domain semantics in UI-only models.
@@ -153,8 +153,8 @@ Both genome models and functions use versioned dev/release identities, for examp
 - Keep output presentation distinct from parameter editing. Purpose-built editors and component viewers are allowed; no universal form framework or dynamic plugin system is required.
 - Preserve explicit saving of the exact successful current preview; asynchronous obsolete results must not replace newer results or become saveable under different inputs.
 - Remain usable offline after local setup, without a running game database or game client. Offline does not prohibit a local loopback backend; the runtime topology is undecided.
-- Reuse the Cargo workspace and existing engine where appropriate. Do not couple the lab to the connected-client probe, perform a wholesale directory migration, or choose a frontend framework incidentally.
-- Preserve the project's local ports, authority boundaries, database contents, and existing lab store. Read architecture guidance before changing networking/schema. Any unavoidable breaking store migration needs explicit approval; do not reset or fabricate old records.
+- Reuse the Cargo workspace. Reassess domain contracts and implementation from this specification rather than depending on the removed legacy engine. Do not couple the lab to the connected-client probe, perform a wholesale directory migration, or choose a frontend framework incidentally.
+- Preserve the project's local ports, authority boundaries, database contents, and any retained historical lab store. Read architecture guidance before changing networking/schema. Any unavoidable breaking store migration needs explicit approval; do not reset or fabricate old records.
 - Keep workspace checks/tests and CI coverage for lab code. Dependency upgrades are explicit work, not incidental setup.
 
 ## First proof and acceptance criteria
