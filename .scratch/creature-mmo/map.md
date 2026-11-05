@@ -33,6 +33,8 @@ Child tickets contain their own resolution details. Open tickets are discovered 
 
 - [Define a deep but readable genetic model](issues/02-readable-genetics.md): Candidate contextual, variable-length circular genetics agreed without gene capacity; expression must validate the intended length-related tendencies and natural counterplay.
 
+- [Genome Lab revised target](specs/genome-lab.md): Rust web-first editing and rich creature inspection replace the retired TUI design. Seeded generators construct valid genomes, which remain directly editable before interpretation; inverse solvers are excluded. Framework, runtime topology, and generator/interpreter pairing policy remain open. Issues 12 and 13 are historical implementation records.
+
 ## Not yet specified
 
 - How exploration, wild encounters, capture, loot, and biome-linked creature families form a satisfying daily loop; precise choices depend on combat, genetics, and progression.

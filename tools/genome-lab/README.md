@@ -1,5 +1,7 @@
 # Genome Lab
 
+> **Legacy TUI prototype — design retired.** The [current specification](../../.scratch/creature-mmo/specs/genome-lab.md) targets a Rust web-first lab with seeded genome generation, rule-respecting direct editing, and rich creature visualization. The web framework and runtime topology are undecided; the new solution is not implemented. The commands and controls below describe existing legacy code, not the future UI. No TUI feature parity is required, and existing stores must be preserved.
+
 Run offline from the repository root with `cargo run --locked -p genome-lab-tui`. The TUI uses `.local/genome-lab.json` by default; set `GENOME_LAB_STORE` to select another store. It does not start Bevy, SpacetimeDB, or a network service.
 
 ## Current implementation
@@ -34,4 +36,4 @@ The migration test uses a temporary fixture. The user's `.local/genome-lab.json`
 
 `crates/genome` owns typed data contracts, model/function validation and computation, lifecycle metadata, run snapshots, comparisons, batches, sweeps, and persistence. `tools/genome-lab/src/*_ui.rs` owns the example editors; the host owns selection, layout, focus, preview scheduling, and persistence. New released computational behavior must use a new coded version; presentation-only editor improvements do not change computation versions.
 
-The [living specification](../../.scratch/creature-mmo/specs/genome-lab.md) defines the target design. [Issue 13](../../.scratch/creature-mmo/issues/13-genome-lab-editors-and-live-preview.md) tracks this implementation; issue 12 remains the historical initial lab ticket.
+The [living specification](../../.scratch/creature-mmo/specs/genome-lab.md) defines the target design. [Issue 13](../../.scratch/creature-mmo/issues/13-genome-lab-editors-and-live-preview.md) records this legacy implementation; issue 12 records the historical initial lab. Neither is the implementation plan for the revised web lab.

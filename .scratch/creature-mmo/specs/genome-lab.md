@@ -1,14 +1,30 @@
 # Genome Lab specification
 
-Status: agreed target design; implemented in issue 13 (verification recorded in the issue comments)
+Status: agreed revised target design; Rust web-first lab and explicit genome generation are not yet implemented. The TUI design is retired.
 
 ## Goal
 
-Build an offline execution and inspection framework for experimenting with genome representations and interpretations that produce creatures. Use Rust and a Ratatui TUI in the existing repository's Cargo workspace.
+Build an offline-capable, web-first execution, editing, and visual inspection lab for experimenting with genome generators, genome representations, and interpreters that produce creatures. All authored application code is Rust, including the web UI; this is the project-wide language direction. The web framework is undecided. Extend the existing Cargo workspace.
 
-The conceptual model is `f(x) = y`: `x` is genome data, `f` is an interpretation, and `y` is a creature (abilities, stats, passives, etc.). Representation plus interpretation determines behavior. The lab hosts experiments; it does not prescribe genetics semantics.
+The forward model is:
 
-This document defines the agreed target design, not a claim that all behavior is implemented. The initial lab was implemented under [issue 12](../issues/12-genome-lab.md), which remains a historical implementation ticket. [Issue 13](../issues/13-genome-lab-editors-and-live-preview.md) tracks the next implementation: typed compatibility, owned editors, shared lifecycle/archiving, and live previews. See the [lab README](../../../tools/genome-lab/README.md) for current app behavior. No unrequested gameplay changes belong in the connected-client probe.
+```text
+D₀ = G(s; p_G)       Generate an initial valid genome
+D  = E(D₀)           Apply permitted edits (or leave it unchanged)
+Y  = I(D; p_I)       Interpret the actual genome into a creature
+
+Combined: Y = I(E(G(s; p_G)); p_I)
+```
+
+- `G`: genome generator; `s`: explicit seed; `p_G`: generator parameters.
+- `D₀`: generated genome data; `E`: the applied sequence of rule-respecting genome edits; `D`: actual genome data after editing.
+- With no edits, `E` is the identity operation: `E(D₀) = D₀`. The interpreter always receives the genome after the editing stage, including when that stage leaves it unchanged.
+- `I`: interpreter; `p_I`: interpreter parameters; `Y`: creature.
+- The two parameter sets are independent. A generator is a construction aid, not a replacement for concrete, editable genome data.
+
+The lab hosts experiments; it does not prescribe genetics semantics. JSON may remain a serialization format, but is neither the domain model nor the required editing experience.
+
+This document defines the revised target, not implemented behavior. [Issue 12](../issues/12-genome-lab.md) and [issue 13](../issues/13-genome-lab-editors-and-live-preview.md) are historical TUI implementation records. Their Ratatui-specific UI requirements are superseded. See the [lab README](../../../tools/genome-lab/README.md) for the still-existing legacy application. This documentation change neither implements the web lab nor removes the TUI code. No unrequested gameplay changes belong in the connected-client probe.
 
 ## Motivation and relationship to existing decisions
 
@@ -25,9 +41,21 @@ Creature production is the initial scope. Producing interesting creatures does n
 - A genome model defines its structure, validation rules, permitted edits, and supported inspection/editing capabilities.
 - Genome data is a concrete input instance, distinct from its model definition. Version the coded model, not each edit to an input instance.
 - Each versioned genome model supplies a meaningful Rust data type. Several models/versions may supply the same type.
-- Models are constructed separately from the lab, initially as Rust code.
+- Models are constructed separately from the lab as Rust code.
 - The lab may edit only explicitly exposed fields or operations, respecting model validation and structural constraints. It must not assume arbitrary field mutation is valid.
-- Changes to the representation itself are code changes, not something the initial TUI must author.
+- Changes to the representation itself are code changes, not something the web editor must author.
+- Generated genomes remain directly editable. Editors expose meaningful, model-specific operations rather than requiring hand-authored JSON.
+- The model owns validation and allowed operations; the generator and editor use the same authoritative rules. Invalid/incomplete drafts may be displayed but must not be interpreted as accepted genomes.
+
+### Genome generators
+
+- A coded Rust generator constructs valid genome data from an explicit seed and exposed parameters, making construction easier and less error-prone than building inputs by hand.
+- The same seed, generator version, model contract, and generator parameters must produce the same genome. A seed alone is not a reproducibility guarantee across parameter or version changes.
+- Generators may produce a subset of valid genomes. Valid manual edits need not remain reachable through generator inputs.
+- Preserve the distinction between generation, concrete genome editing, and interpretation. Changing interpreter parameters does not implicitly regenerate a genome.
+- Regeneration must not silently discard manual edits; the precise candidate/replacement interaction remains a UI design decision.
+- Record generator identity/version, seed, and effective parameters as provenance alongside the actual edited genome snapshot. An edit log is optional, not required for reproduction.
+- No inverse solver is required: do not recover seed/parameters from edited genome data or recover a genome from a target creature. Reading recorded provenance is not inversion.
 
 ### Interpretations
 
@@ -37,6 +65,7 @@ Creature production is the initial scope. Producing interesting creatures does n
 - Compatible types plus validated genome input and function parameters must yield valid output. A failure after accepted validation is an implementation error, not ordinary incompatibility.
 - Identical input, parameters, and interpretation version must yield identical output. Any future randomness must have an explicit recorded seed rather than hidden ambient state.
 - Interpretations are constructed separately in Rust. The lab exposes only parameters explicitly declared editable by their authors.
+- The interpreter consumes `D`, the actual possibly edited genome, not necessarily the original generated `D₀`.
 - Do not require a scripting language, dynamic plugin loading, a universal genome representation, or a pipeline editor. Ordinary typed Rust contracts and explicit registration are sufficient.
 
 ### Type-derived compatibility graph
@@ -44,7 +73,8 @@ Creature production is the initial scope. Producing interesting creatures does n
 - Represent compatibility as a bipartite graph: genome-version nodes and function-version nodes, with edges only between the two kinds. Many disconnected islands are expected.
 - Derive edges from matching coded Rust data contracts; do not maintain a separate manual edge list or infer compatibility from JSON shape, labels, lifecycle, or graph reachability.
 - Compatibility requires a direct edge. Sharing an island does not make every genome/function pair compatible.
-- Use meaningful types rather than treating every collection of numbers as interchangeable. Enforce the same contract in execution and TUI selection.
+- Use meaningful types rather than treating every collection of numbers as interchangeable. Enforce the same contract in execution and web UI selection.
+- The existing model/interpreter typed-compatibility rules remain the baseline. How generators are registered and linked to interpreters, including whether pairings are exclusive, is not yet decided. Do not silently impose one-to-one pairing or treat matching JSON shape as semantic compatibility.
 - Dev/release combinations are all allowed when their types match, including release functions with dev genomes and vice versa. Persistence eligibility is separate.
 
 ### Creature outputs
@@ -52,13 +82,16 @@ Creature production is the initial scope. Producing interesting creatures does n
 - Interpretations dictate their output format by composing it from a standard set of supported components.
 - This is not one prematurely fixed universal stat block. Components must accommodate the declared creature stats, abilities, passives, and other supported creature fields.
 - The lab must present all declared output; silently dropping unsupported fields is not acceptable.
+- The web UI must support rich, structured inspection rather than text-only result dumps: interactive 3D creature shape, stats, curves, abilities (including range, AOE, and effect chains), and passives as those components are introduced. The component/viewer design must allow further kinds of output.
+- Use structured semantic output data to drive appropriate viewers. Text details remain useful as a complement, not the sole presentation.
+- Spatial range/AOE previews and effect-chain inspection are visualizations, not evidence of combat simulation or balance. These requirements do not authorize implementing the entire gameplay system in the first web slice.
 - Comparisons must use semantic identity and units/meaning, not merely matching display names. Two fields called "power" need not be comparable.
 - Initial interpretation output is a creature only. Intermediate transformations may exist privately inside an interpretation, but general transformation composition is deferred.
 
 ### Lab responsibilities
 
-- Discover/select registered models and interpretations and expose only compatible combinations.
-- Load/create concrete inputs using declared capabilities; expose supported genome edits and interpretation parameters.
+- Discover/select registered models, generators, and interpreters and expose only compatible combinations.
+- Generate concrete inputs from seeds and generator parameters, load existing inputs, and expose supported direct genome edits and interpreter parameters.
 - Validate, execute, inspect creatures, compare results, and run batches.
 - Preserve reproducible experiment definitions and eligible run records.
 - Remain independent of any particular genetics algorithm or representation.
@@ -67,13 +100,14 @@ Creature production is the initial scope. Producing interesting creatures does n
 ## Experiments, batches, and parameter sweeps
 
 - Treat experiment definitions and recorded runs as distinct concepts.
-- A definition identifies the genome model/version, genome input, interpretation/version, and parameters; a run records the executed values and resulting creature or failure.
+- A definition identifies the genome model/version, actual genome input, interpreter/version, and interpreter parameters, plus generator/version, seed, and generator parameters when generated. A run records the executed values and resulting creature or failure.
+- Save the actual edited genome, not just the generation recipe: a seed and generator parameters alone cannot reproduce manual edits. Retain original generation provenance without implying it directly generates the edited result. Historical records without generator provenance remain valid historical evidence; do not invent provenance for them.
 - Live execution produces an unsaved preview. Saving a successful run is an explicit action, permitted only when both genome and function are release versions. Deprecation alone does not remove eligibility. Never automatically append a run for every edit or selection change.
 - Each saved successful run owns a snapshot of the actual processed genome data alongside its parameters and creature result. Do not rely solely on a mutable external genome file/reference.
 - Preserve historical runs rather than overwriting old evidence when rerunning an experiment.
 - Support individual execution, result comparison, and batches in the initial scope.
 - A batch continues when an individual case is invalid or execution fails; record/report that case's failure explicitly rather than silently skipping it or aborting unrelated cases.
-- Support parameter sweeps: execute across a declared range/set of exposed parameter values and compare the resulting creatures. For example, vary interaction strength from `0.1` through `1.0` for an interpretation that exposes such a parameter. This is structured batch execution, not a balance proof.
+- Support parameter sweeps: execute across a declared range/set of exposed parameter values and compare the resulting creatures. Distinguish seed variation, generator-parameter variation, and interpreter-parameter variation; interpreter-only sweeps hold the actual genome fixed. Rules for combining generator sweeps with manual edits remain to be designed; do not silently replay edits onto unrelated regenerated data. This is structured batch execution, not a balance proof.
 - Any execution involving a dev genome or dev function, and batch failures, remains ephemeral under the lifecycle rules below; persistence applies only to explicitly saved eligible release/release runs.
 
 ## Genome and interpretation identity and lifecycle
@@ -83,7 +117,7 @@ Creature production is the initial scope. Producing interesting creatures does n
 Both genome models and functions use versioned dev/release identities, for example `genome_dev_1`, `genome_release_1`, `function_dev_1`, and `function_release_1`.
 
 - Coded names are persistent data-association keys. Renaming is unsupported; do not require a separate stable-ID scheme initially.
-- Deprecation and archiving are separate code-owned metadata, not naming categories or TUI/store settings. Do not rename entries to change either flag. Code is authoritative over cached registry flags.
+- Deprecation and archiving are separate code-owned metadata, not naming categories or UI/store settings. Do not rename entries to change either flag. Code is authoritative over cached registry flags.
 - Genome model definitions are distinct from the concrete input snapshots owned by runs.
 
 ### Dev and release
@@ -101,65 +135,64 @@ Both genome models and functions use versioned dev/release identities, for examp
 
 - Either a genome or function may be archived directly in code; prior deprecation is not required.
 - Archive genomes and functions independently, without cascading to their compatible neighbors or requiring neighbors to be archived first.
-- Archived entries are hidden from TUI authoring selectors, but remain registered. Handle an empty active selector or a genome with no active compatible functions without crashing or selecting an incompatible pair.
+- Archived entries are hidden from web authoring selectors, but remain registered. Handle an empty active selector or a genome with no active compatible functions without crashing or selecting an incompatible pair.
 - Preserve stored runs, genome snapshots, experiment definitions, and historical identity/metadata. Archiving does not rewrite or delete historical evidence. Saved data referencing archived entries remains inspectable; loading must not silently reactivate them for authoring.
 - Remove deletion mechanics, destructive confirmation flows, cascade deletion, and deletion-based eligibility. Archiving is not source removal or a data cleanup operation.
 - Retain missing-release registration detection: accidental source/registration removal must be reported, not interpreted as archiving or permission to erase data.
 
-## First interface and repository integration
+## Web interface and repository integration
 
-- Use a Ratatui TUI as the first inspection/editing interface, not a CLI-only report phase or a web-first lab requirement.
-- Keep execution/model contracts independent of the TUI so other interfaces can be added later.
-- Code a dedicated Ratatui editor alongside each genome model and function, in separate UI modules. Mirror the implementation identity: `genome_release_1_ui` and `function_release_1_ui`.
-- A genome UI edits permitted concrete input fields and any exposed generation/preparation parameters. A function UI edits only its function parameters; it does not own result rendering.
-- Editors own field rendering, interaction, draft state, and inline validation feedback, while model/function code remains authoritative for validation and the actual values used in execution. Do not duplicate parameter semantics in a parallel UI-only model.
-- Start with simple working editors for testing, not a generic form framework. Preserve compact equal-height Genome/Function/Results selectors and lower genome/function editor areas. The host owns layout, focus, selection, execution, and persistence.
-- Recompute an unsaved preview on valid genome edits, genome/function parameter changes, and compatible selection changes. Incomplete or invalid drafts do not execute. Clearly identify any retained previous result as stale when it no longer represents current inputs, including after a preview failure.
-- Result rendering remains separate; custom per-function result UIs are deferred. Continue displaying all declared output through the existing generic presentation.
-- The repository already is a Cargo workspace (`client`, `server`); extend it rather than introducing another monorepo framework or doing a wholesale directory migration.
-- A possible additive layout is:
-
-```text
-client/                 # Existing web-first connected-client probe
-server/                 # Existing SpacetimeDB module
-crates/genome/          # Model/interpretation/execution contracts and logic
-tools/genome-lab/       # Ratatui application
-experiments/genomes/    # Saved example inputs/experiment fixtures
-```
-
-These new paths are suggestions, not fixed implementation requirements. Actual persistence layout and component APIs still need implementation design.
-
-- The lab must run offline without compiling/starting the game's renderer or requiring a running database.
-- Preserve the existing web-first client/server workflow, authority boundaries, local ports, and database contents.
-- Keep workspace checks/tests and CI coverage for the lab crates. The current `scripts/check.sh` checks both lab packages and `scripts/test.sh` tests them alongside the headless client.
-- Do not upgrade dependencies or alter networking/schema as incidental lab setup.
+- Web UI is the primary interactive lab. The Ratatui solution, terminal layout, keyboard/focus conventions, and mandatory identity-named Ratatui editor modules are retired requirements. Do not maintain TUI feature parity or extend it as the new target.
+- Existing TUI code remains a legacy prototype until an explicit implementation/removal change. Preserve reusable engine behavior, regression tests, and historical data; retiring a design does not authorize deleting code or stored experiments.
+- All authored application code is Rust, including web UI and any backend. No web framework, rendering library, browser-WASM versus local-backend architecture, or new deployment/port arrangement is selected by this spec.
+- Keep model, generation, validation, editing operations, interpretation, and persistence contracts independent of the chosen UI framework and game/network startup.
+- Provide model-appropriate genome editors, generator controls with explicit seed and parameters, and interpreter parameter editors with discoverable actions and inline validation. Do not duplicate authoritative domain semantics in UI-only models.
+- Support the workflow: choose a generator/model, generate a valid genome, inspect/edit it, select a compatible interpreter, adjust its parameters, and inspect the creature.
+- Recompute unsaved creature previews after accepted genome edits and interpreter parameter changes; generation changes first produce a new genome candidate. Incomplete/invalid drafts do not execute. Retained results must be visibly stale when they no longer match current inputs or a preview fails.
+- Rich component viewers and comparisons replace text-only inspection. Exact screen layout and the first representative visualization slice remain to be designed; do not simply translate the terminal panels into HTML.
+- Keep output presentation distinct from parameter editing. Purpose-built editors and component viewers are allowed; no universal form framework or dynamic plugin system is required.
+- Preserve explicit saving of the exact successful current preview; asynchronous obsolete results must not replace newer results or become saveable under different inputs.
+- Remain usable offline after local setup, without a running game database or game client. Offline does not prohibit a local loopback backend; the runtime topology is undecided.
+- Reuse the Cargo workspace and existing engine where appropriate. Do not couple the lab to the connected-client probe, perform a wholesale directory migration, or choose a frontend framework incidentally.
+- Preserve the project's local ports, authority boundaries, database contents, and existing lab store. Read architecture guidance before changing networking/schema. Any unavoidable breaking store migration needs explicit approval; do not reset or fabricate old records.
+- Keep workspace checks/tests and CI coverage for lab code. Dependency upgrades are explicit work, not incidental setup.
 
 ## First proof and acceptance criteria
 
-1. Implement two genuinely different genome representations with interpretations, demonstrating that the framework is not a circular-genome UI disguised as a generic framework.
-2. Demonstrate multiple interpretations for at least one data type, multiple genome models sharing that type, and a different-type island. Derive compatibility from types and prevent incompatible execution even outside the TUI.
-3. In the TUI, select a model/input and compatible interpretation, edit through their dedicated coded UIs, and observe live previews on valid edits and selection changes. Invalid drafts must not execute; stale results must be marked. Inspect every declared creature-output component.
-4. Compare individual outputs and exercise a batch and parameter sweep, including a failing case that does not stop remaining cases.
-5. Verify deterministic execution for identical inputs/parameters and the same interpretation implementation.
-6. Exercise all four dev/release pairings. Only release/release previews can be explicitly saved; previews never auto-save. Saved runs preserve both version identities, independent genome snapshots, parameters, and outputs across restarts.
-7. Demonstrate separate code-owned deprecation and archiving for both genomes and functions: deprecated releases remain usable/saveable, direct independent archiving hides choices without deleting data, missing registrations are detected, and deletion mechanics are absent.
-8. Test the engine separately from the TUI and existing client/server. Verify the actual terminal inspection flow; compilation alone is not evidence of usability.
-9. Run `scripts/check.sh` and `scripts/test.sh` after changes and report exact commands, blockers, and unverified behavior. If implementation touches networking/schema, additionally follow the repository's integration/browser requirements.
+1. Demonstrate two genuinely different genome representations with Rust generators and interpreters; the lab must not hard-code circular genetics.
+2. Verify deterministic generation for identical seed, generator version, model contract, and parameters; verify deterministic interpretation for the same actual genome, interpreter version, and parameters.
+3. In a real browser, generate a valid genome, edit it through model-respecting controls, adjust interpreter parameters, and observe the resulting creature. Invalid drafts must not execute; stale/error states must be visible.
+4. Demonstrate generation and editing as separate stages: manual edits remain possible, changing interpretation parameters preserves the genome, and regeneration does not silently destroy edits.
+5. Inspect all declared output with appropriate structured viewers, not only text. Stage richer viewers as shape, curves, abilities, range/AOE, effect chains, and passives become available; demonstrate a representative visual slice without claiming unimplemented gameplay.
+6. Preserve typed model/interpreter compatibility, including shared-type examples and a different-type island; reject incompatible execution outside the web UI as well. Resolve generator registration/pairing before its implementation.
+7. Compare outputs and exercise batches and parameter sweeps, including a failing case that does not abort other cases. Distinguish generator/seed sweeps from interpreter-only sweeps.
+8. Preserve explicit release/release saving and ephemeral dev-involved runs under existing model/interpreter lifecycle rules. Saved generated runs retain actual edited genome snapshots, generation provenance, interpreter version/parameters, and output across restarts. Decide generator lifecycle eligibility before implementing generator-backed persistence.
+9. Preserve independent code-owned deprecation/archiving, historical inspection, missing-registration detection, and absence of deletion cascades. Test legacy-store compatibility non-destructively with fixtures/copies; never rewrite released historical evidence.
+10. Test the engine independently of the web UI and game services. Verify actual browser interaction and rendering; compilation is not evidence of visual usability.
+11. For implementation changes run `scripts/check.sh` and `scripts/test.sh`; networking/schema changes additionally require `scripts/test-integration.sh` and the scenarios in `docs/browser-qa.md`. Add lab-specific browser scenarios when the web implementation exists. Report exact commands, blockers, and unverified behavior.
 
-## Deferred
+## Open implementation/design decisions
 
-- Custom result UIs; function-owned UIs currently edit parameters only.
+- Rust web framework and rendering tools, including integration of 3D views.
+- Browser-WASM execution versus a local Rust backend, file/storage integration, and deployment topology.
+- Generator identity/version registration and lifecycle: whether it is separately versioned from the model, how release eligibility applies, and how archived generators affect authoring. Existing model/interpreter policy must not be silently rewritten.
+- Generator/interpreter links: exclusive pairing versus reusable compatible pairings/defaults. The user's linked workflow does not yet settle exclusivity.
+- Regeneration/candidate replacement UX, treatment of manual edits in generator sweeps, initial screen layout, and the first rich visualization slice.
+
+## Deferred or excluded
+
+- Inverse generation (recovering seed/parameters from a genome) and inverse interpretation (finding a genome for a target creature). Exact historical provenance is retained instead.
+- TUI feature parity or further TUI UX investment as the target solution.
 - Functions accepting heterogeneous Rust input data types, implicit conversions, and manual compatibility-edge authoring.
-- Explanation/causal traces and detailed intermediate-value inspection. Valuable, but not a prerequisite for the first interpretations or lab.
-- Combat simulation and strategic counterplay verification.
-- Balance proofs and automated balancing systems.
+- Explanation/causal traces and detailed intermediate-value inspection, unless separately requested.
+- Combat simulation, strategic counterplay verification, balance proofs, and automated balancing.
 - Breeding simulation and evolution mechanics.
 - General transformation pipelines or a pipeline editor.
-- Rich in-lab authoring of new genome types or arbitrary interpretation algorithms.
-- Additional web/CLI interfaces, dynamic plugin infrastructure, and scripting languages unless later justified.
+- In-lab authoring of new genome types or arbitrary generator/interpreter algorithms; these remain coded in Rust.
+- Additional interactive interfaces, dynamic plugin infrastructure, and scripting languages unless later justified.
 
-## Comments
+## Decision history
 
-Design captured from the user discussion: the central correction was to make the lab a general execution/inspection framework, with separately constructed representations and interpretations and only explicitly supported in-lab edits. The circular-genome candidate must not leak into the generic lab contracts. Coded names remain identities, with dev/release naming and metadata-only deprecation.
+The initial TUI demonstrated general genome experimentation, typed compatibility, shared model/interpreter lifecycle, independent archiving, live previews, and explicit saving. Issues 12 and 13 retain that implementation history, not current UI requirements.
 
-Follow-up design supersedes deletion-based lifecycle rules and one-model-identity-per-function compatibility: genomes now share the function lifecycle, with independent code-owned archiving and no deletion; matching meaningful Rust data types derive a bipartite compatibility graph. Dedicated genome/function editors drive live unsaved previews, and saving requires an explicit action with a release/release pair. Implementation is tracked in [issue 13](../issues/13-genome-lab-editors-and-live-preview.md); this spec update does not implement those changes.
+The revised solution retires TUI-first design because genome/parameter editing was obscure and text-only result presentation cannot adequately support the intended spatial and compositional creatures. The target is now a Rust web-first lab with rich inspection and explicit seeded generation followed by editable genome data and interpretation. Framework and runtime topology remain undecided. This revision is documentation only.

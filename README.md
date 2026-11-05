@@ -3,8 +3,9 @@
 A web-first **Bevy 0.20.1 + SpacetimeDB 2.14.0** foundation, following
 `../spacetime-bevy/`. The web client has no gameplay: its connected-client probe
 shows a live list of connections, with yours marked **(you)**. The workspace also
-contains an independent offline **Genome Lab** Ratatui prototype for experimenting
-with genome models and interpretation functions.
+contains an independent offline **Genome Lab** legacy Ratatui prototype. Its
+revised target is a Rust web-first lab with seeded genome generation, direct
+genome editing, and rich creature inspection; the web framework is undecided.
 
 ## Setup
 
@@ -49,7 +50,12 @@ credentials are stored in ignored `.local/`. Keep `.local/cli.toml` to retain
 publication ownership. Publication refuses data deletion and does not inherit
 your global cloud default. Schema-breaking changes need explicit review.
 
-## Genome Lab (offline prototype)
+## Genome Lab (legacy offline prototype)
+
+The TUI design is retired; the [current specification](.scratch/creature-mmo/specs/genome-lab.md)
+defines the Rust web-first replacement. It is not yet implemented. The command
+and behavior below describe the existing prototype, which remains available;
+this design change does not remove code or stored experiments.
 
 ```sh
 cargo run --locked -p genome-lab-tui
@@ -64,8 +70,8 @@ previews remain ephemeral. Archiving hides authoring choices without deleting
 history, and legacy stores are upgraded additively while preserving old identities
 and tombstone evidence. See the [lab README](tools/genome-lab/README.md) for
 controls and migration details, the [living specification](.scratch/creature-mmo/specs/genome-lab.md),
-and [issue 13](.scratch/creature-mmo/issues/13-genome-lab-editors-and-live-preview.md).
-Issue 12 remains the historical initial implementation ticket.
+and the historical [issue 13](.scratch/creature-mmo/issues/13-genome-lab-editors-and-live-preview.md).
+Issues 12 and 13 are legacy implementation records, not the new web UI plan.
 
 ## Verification
 
