@@ -2,10 +2,11 @@
 
 A web-first **Bevy 0.20.1 + SpacetimeDB 2.14.0** foundation, following
 `../spacetime-bevy/`. The web client has no gameplay: its connected-client probe
-shows a live list of connections, with yours marked **(you)**. The workspace also
-contains an independent offline **Genome Lab** legacy Ratatui prototype. Its
-revised target is a Rust web-first lab with seeded genome generation, direct
-genome editing, and rich creature inspection; the web framework is undecided.
+shows a live list of connections, with yours marked **(you)**.
+
+Game design starts fresh from the [tactical-breeding spec](.scratch/tactical-breeding/spec.md)
+and its [design map](.scratch/tactical-breeding/map.md). Previous design decisions
+and tool plans are discarded as requirements; they are not future implementation targets.
 
 ## Setup
 
@@ -50,14 +51,14 @@ credentials are stored in ignored `.local/`. Keep `.local/cli.toml` to retain
 publication ownership. Publication refuses data deletion and does not inherit
 your global cloud default. Schema-breaking changes need explicit review.
 
-## Genome Lab
+## Historical experiments
 
-The retired Genome Lab TUI, domain engine, and sample experiments have been
-removed. Its [web-first specification](.scratch/creature-mmo/specs/genome-lab.md)
-remains the target for a future implementation and is not yet implemented.
-Historical issues 12 and 13 remain as records of the former design and work.
+The former Genome Lab TUI, domain engine, and sample experiments have been
+removed. Former Creature MMO, Genome Lab, and Simlab planning documents are
+[archived history](.scratch/archive/README.md), not active requirements.
 The ignored `.local/genome-lab.json` store, if present, is deliberately left
-untouched and is not used by the project.
+untouched and is not used by the project. The planning reset does not change
+existing code, database contents, or engineering safety rules.
 
 ## Ratatui starter
 
@@ -84,7 +85,7 @@ Press `q` to quit. The starter's test uses Ratatui's in-memory test backend.
 
 `check.sh --native` also runs client unit tests. Client tests use
 `--no-default-features` to exercise the network library headlessly without
-compiling the renderer. Both scripts also cover the lab packages. The integration test opens connections
+compiling the renderer. Both scripts also cover the Ratatui starter. The integration test opens connections
 sharing an identity, verifies replication to both, removes one, and reconnects.
 It tolerates unrelated connected browsers and removes its own sessions on exit.
 It does not prove rendering. Follow [browser QA](docs/browser-qa.md) for that.

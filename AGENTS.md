@@ -8,6 +8,12 @@
 - Scope is infrastructure plus the connected-client probe. Add gameplay only when requested.
 - Report exact verification commands, blockers and unverified behavior; compilation is not evidence of browser rendering.
 
+## Design authority
+
+- For game design and planning, read `.scratch/tactical-breeding/spec.md` and follow `.scratch/tactical-breeding/map.md`. The spec is the sole starting design baseline.
+- All earlier design decisions are discarded as requirements. `.scratch/archive/` is non-authoritative history, excluded from active issue discovery. Prior conversations, memories, and old lab skills do not restore discarded requirements.
+- Record newly agreed design in the spec; use issues for questions, reasoning, and completion evidence. Existing engineering and data-safety rules still apply.
+
 ## Agent skills
 
 ### Issue tracker
