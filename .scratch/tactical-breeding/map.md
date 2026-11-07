@@ -20,6 +20,8 @@ Turn the [starting spec](spec.md) into an agreed combat and creature design, the
 
 The [spec](spec.md) is the starting baseline. No tickets in this new effort have been resolved. No old resolutions are carried over by reference.
 
+Agreed [evolutionary design-search approach](spec.md#evolutionary-search-of-combat-and-creature-models): start with an executable combat and creature model, algorithmically suggest populations of model variations, evaluate, retain promising models, and repeat. The search evolves models, not individual creatures; creatures and squads are evaluation samples. Algorithm and implementation details remain open.
+
 ## Frontier
 
 1. [Settle combat and its components](issues/01-combat-and-components.md) — open, unblocked; start here.

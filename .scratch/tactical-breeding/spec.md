@@ -142,6 +142,26 @@ Inheritance can preserve recognizable mechanic structures while also recombining
 
 The exact grammar, inheritance probabilities, player controls, expression rules, and numerical values remain to be designed.
 
+## Evolutionary search of combat and creature models
+
+Agreed approach: begin with an initial executable combat and creature model, then iteratively generate, evaluate, retain, and vary a population of candidate model designs.
+
+**The evolutionary search targets combat and creature models, not individual creatures.** A candidate defines how combat operates and what creatures are composed of, including how their stats, abilities, passives, and interactions work. Inheritance rules can later be included as part of the model search; their details remain open.
+
+Actual creatures and squads are test samples used to evaluate what each candidate model enables and produces. Selecting a strong individual creature is not the objective of this design-search loop. This process is separate from in-game creature breeding.
+
+The intended loop is:
+
+1. Define a small initial combat and creature model with enough rules to execute encounters.
+2. Have an algorithm suggest a next-generation population of model variations.
+3. Evaluate those candidates through simulation and human playtesting against the intended experience below.
+4. Keep promising models and discard unsuccessful candidates from the search population.
+5. Generate further variations from retained models and repeat.
+
+The initial model is a starting point, not a permanent commitment. Evaluation can motivate explicit revisions to combat and creature rules. The goal is to discover promising systems, not to prove a single universally perfect system or maximize individual creature strength.
+
+The evolutionary algorithm, model representation, permitted mutations/recombination, population size, selection procedure, and automation/human-review split remain undecided. This agreement does not authorize implementation or deletion of existing code or data.
+
 ## Simulation and evaluation direction
 
 Evaluate implementations against separate goals rather than one combined quality or fun score:
@@ -185,4 +205,5 @@ These remain possible later techniques. The scope was explicitly narrowed before
 - Aim for a large viable middle with small weak and exceptional tails, without assuming a proven normal distribution.
 - Abilities follow a compositional mechanic model; complete kits and spells are not fixed catalogue entries.
 - Begin with combat, then creature composition, then simulation of combat, creatures, and breeding.
+- Use iterative evolutionary search over candidate combat and creature models; actual creatures and squads are evaluation samples, not the evolutionary design targets.
 - Full ecosystem simulation is outside the initial scope.
